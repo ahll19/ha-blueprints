@@ -1,6 +1,7 @@
 blueprint:
   name: Automatic lights with override (room)
   description: >
+    Version 0.1
     Turns on lights on movement when it is dark, and turns them off after inactivity.
     Manual changes activate an override via a timer.
 
