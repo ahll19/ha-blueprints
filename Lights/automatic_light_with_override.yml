@@ -1,0 +1,183 @@
+blueprint:
+  name: Automatic lights with override (room)
+  description: >
+    Turns on lights on movement when it is dark, and turns them off after inactivity.
+    Manual changes activate an override via a timer.
+
+    Logic:
+    - Movement turns on lights if dark and override is not active
+    - Movement during override resets the timer
+    - Manual change starts the override timer
+    - No movement turns off lights if override is inactive
+    - If the timer expires while there is still presence, it is restarted
+
+  domain: automation
+
+  input:
+    light_entities:
+      name: Lights
+      description: Lights to control
+      selector:
+        entity:
+          domain: light
+          multiple: true
+
+    occupancy_sensor:
+      name: Occupancy sensor
+      description: Binary sensor indicating presence in the room
+      selector:
+        entity:
+          domain: binary_sensor
+
+    override_timer:
+      name: Override timer
+      description: Timer used for manual override
+      selector:
+        entity:
+          domain: timer
+
+    lux_sensor:
+      name: Illuminance sensor (optional)
+      description: Sensor used to determine if it is dark
+      default: null
+      selector:
+        entity:
+          domain: sensor
+
+    lux_threshold:
+      name: Illuminance threshold
+      description: Only turn on lights if below this value
+      default: 80
+      selector:
+        number:
+          min: 0
+          max: 1000
+          unit_of_measurement: lx
+
+    no_movement_delay:
+      name: No movement delay
+      description: Time before lights are turned off after no presence
+      default: 180
+      selector:
+        number:
+          min: 0
+          max: 3600
+          unit_of_measurement: seconds
+
+    auto_enable_boolean:
+      name: Auto lighting enabled (optional)
+      description: If set, must be "on" for automation to turn on lights
+      default: null
+      selector:
+        entity:
+          domain: input_boolean
+
+mode: restart
+
+variables:
+  lux_sensor: !input lux_sensor
+  lux_threshold: !input lux_threshold
+  auto_enable_boolean: !input auto_enable_boolean
+
+trigger:
+  - platform: state
+    entity_id: !input light_entities
+    id: light_change
+
+  - platform: state
+    entity_id: !input override_timer
+    from: active
+    to: idle
+    id: timer_run_out
+
+  - platform: state
+    entity_id: !input occupancy_sensor
+    from: "off"
+    to: "on"
+    id: movement
+
+  - platform: state
+    entity_id: !input occupancy_sensor
+    from: "on"
+    to: "off"
+    for:
+      seconds: !input no_movement_delay
+    id: no_movement
+
+condition: []
+
+action:
+  # --- No movement → turn off if no override ---
+  - if:
+      - condition: trigger
+        id: no_movement
+    then:
+      - if:
+          - condition: state
+            entity_id: !input override_timer
+            state: idle
+        then:
+          - service: light.turn_off
+            target:
+              entity_id: !input light_entities
+
+  # --- Manual light change → start override ---
+  - if:
+      - condition: trigger
+        id: light_change
+    then:
+      - if:
+          - condition: template
+            value_template: >
+              {{ trigger.to_state.context.user_id is not none }}
+        then:
+          - service: timer.start
+            target:
+              entity_id: !input override_timer
+
+  # --- Movement logic ---
+  - if:
+      - condition: trigger
+        id: movement
+
+      # Optional auto-enable boolean
+      - condition: template
+        value_template: >
+          {{ auto_enable_boolean is none or is_state(auto_enable_boolean, 'on') }}
+
+      # Optional lux condition
+      - condition: template
+        value_template: >
+          {{ lux_sensor is none or states(lux_sensor) | float(9999) < lux_threshold }}
+
+    then:
+      - if:
+          - condition: state
+            entity_id: !input override_timer
+            state: active
+        then:
+          - service: timer.start
+            target:
+              entity_id: !input override_timer
+        else:
+          - service: light.turn_on
+            target:
+              entity_id: !input light_entities
+
+  # --- Timer expired ---
+  - if:
+      - condition: trigger
+        id: timer_run_out
+    then:
+      - if:
+          - condition: state
+            entity_id: !input occupancy_sensor
+            state: "on"
+        then:
+          - service: timer.start
+            target:
+              entity_id: !input override_timer
+        else:
+          - service: light.turn_off
+            target:
+              entity_id: !input light_entities
