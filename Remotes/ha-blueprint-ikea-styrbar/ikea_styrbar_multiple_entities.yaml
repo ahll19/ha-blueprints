@@ -25,6 +25,13 @@ blueprint:
 
     * **Zigbee Integration:** Your IKEA Styrbar remote must be paired via Zigbee2MQTT.
     * **Input Helper:** The `input_number` helper is strictly required to act as the remote's memory.
+
+    ## Changelog
+    * Fixed: switching the selected target could leave an already-on light turned off, because the
+      blink effect re-read the light's live state twice. If the device hadn't yet reported its new
+      state back to Home Assistant (common over Zigbee) before the second read, the automation would
+      send the same command twice instead of toggling and restoring. The blink now captures the
+      original state once and always restores to that captured value.
   domain: automation
   source_url: https://github.com/Xat0X/ha-blueprint-ikea-styrbar/blob/main/ikea_styrbar_multiple_entities.yaml
   input:
@@ -439,9 +446,9 @@ action:
         target_index: !input selected_target
         target_entity_id: '{{ (targets | list)[states(selected_target) | int] }}'
         target_entity_domain: '{{ target_entity_id.split(''.'')[0] }}'
+        original_state: '{{ states(target_entity_id) }}'
     - sequence:
-      - service: '{{ target_entity_domain }}.turn_{% if states(target_entity_id) ==
-          ''off'' %}on{% else %}off{% endif %}'
+      - service: '{{ target_entity_domain }}.turn_{% if original_state == ''off'' %}on{% else %}off{% endif %}'
         target:
           entity_id: '{{ target_entity_id }}'
       - delay:
@@ -449,8 +456,7 @@ action:
           minutes: 0
           seconds: 0
           milliseconds: !input blink_time
-      - service: '{{ target_entity_domain }}.turn_{% if states(target_entity_id) ==
-          ''off'' %}on{% else %}off{% endif %}'
+      - service: '{{ target_entity_domain }}.turn_{% if original_state == ''off'' %}off{% else %}on{% endif %}'
         target:
           entity_id: '{{ target_entity_id }}'
     alias: arrow_left_click
@@ -484,9 +490,9 @@ action:
         target_index: !input selected_target
         target_entity_id: '{{ (targets | list)[states(selected_target) | int] }}'
         target_entity_domain: '{{ target_entity_id.split(''.'')[0] }}'
+        original_state: '{{ states(target_entity_id) }}'
     - sequence:
-      - service: '{{ target_entity_domain }}.turn_{% if states(target_entity_id) ==
-          ''off'' %}on{% else %}off{% endif %}'
+      - service: '{{ target_entity_domain }}.turn_{% if original_state == ''off'' %}on{% else %}off{% endif %}'
         target:
           entity_id: '{{ target_entity_id }}'
       - delay:
@@ -494,8 +500,7 @@ action:
           minutes: 0
           seconds: 0
           milliseconds: !input blink_time
-      - service: '{{ target_entity_domain }}.turn_{% if states(target_entity_id) ==
-          ''off'' %}on{% else %}off{% endif %}'
+      - service: '{{ target_entity_domain }}.turn_{% if original_state == ''off'' %}off{% else %}on{% endif %}'
         target:
           entity_id: '{{ target_entity_id }}'
     alias: arrow_right_click
